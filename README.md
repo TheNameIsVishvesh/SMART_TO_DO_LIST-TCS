@@ -3,8 +3,8 @@
 This is the backend and database implementation for the Smart To-Do List Assistant.
 
 ## Project Structure
-- `client/`: React + Vite + Tailwind CSS frontend application (skeleton setup).
-- `server/`: Node.js + Express + MongoDB backend application.
+- `client/`: React + Vite + Tailwind CSS frontend application. Includes Analytics Dashboard & Reports module.
+- `server/`: Node.js + Express + MongoDB backend application. Includes Analytics & PDF/CSV/Excel Generation.
 
 ## Prerequisites
 - Node.js (v14 or higher)
@@ -78,6 +78,23 @@ The server will run on `http://localhost:5000`.
 
 - `POST /:id/reopen`
   - Reopens a completed task. Sets status to `TODO` (or `OVERDUE` if past the due date) and clears the `completedAt` timestamp.
+
+### Analytics & Reports Endpoints
+
+- `GET /api/analytics`
+  - Retrieves productivity metrics including total tasks, completed, pending, overdue, priority distribution, category distribution, and weekly completion rates.
+
+- `GET /api/alerts`
+  - Retrieves smart alerts for overdue tasks, tasks due today/tomorrow, and high-priority incomplete tasks.
+
+- `GET /api/export/csv`
+  - Generates and downloads a CSV report of all tasks.
+
+- `GET /api/export/excel`
+  - Generates and downloads an Excel spreadsheet report of all tasks.
+
+- `GET /api/export/pdf`
+  - Generates and downloads a formatted PDF Productivity Report.
 
 ## Task Model Schema
 - `title` (String, required)

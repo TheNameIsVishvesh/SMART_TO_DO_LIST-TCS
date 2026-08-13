@@ -80,6 +80,7 @@ router.post('/ai/subtasks', aiController.generateSubtasksForTask);
 // ANALYTICS & ALERTS ENDPOINTS
 // ----------------------------------------------------
 router.get('/analytics', analyticsController.getAnalytics);
+router.get('/alerts', analyticsController.getAlerts);
 
 // ----------------------------------------------------
 // EXPORT ENDPOINTS

@@ -17,7 +17,8 @@ const analyticsController = {
       // Group by Category
       const categories = {};
       tasks.forEach(t => {
-        categories[t.category] = (categories[t.category] || 0) + 1;
+        const cat = t.category || 'General';
+        categories[cat] = (categories[cat] || 0) + 1;
       });
       const categoryBreakdown = Object.keys(categories).map(cat => ({
         name: cat,
@@ -103,25 +104,103 @@ const analyticsController = {
           estimatedMinutes: t.estimatedMinutes
         }));
 
+      // Map formats for charts compatibility
+      const tasksByPriority = [
+        { _id: 'HIGH', count: priorityBreakdown.HIGH },
+        { _id: 'MEDIUM', count: priorityBreakdown.MEDIUM },
+        { _id: 'LOW', count: priorityBreakdown.LOW }
+      ];
+
+      const tasksByStatus = [
+        { _id: 'TODO', count: statusBreakdown.TODO },
+        { _id: 'IN_PROGRESS', count: statusBreakdown.IN_PROGRESS },
+        { _id: 'COMPLETED', count: statusBreakdown.COMPLETED },
+        { _id: 'OVERDUE', count: statusBreakdown.OVERDUE }
+      ];
+
+      const tasksByCategory = categoryBreakdown.map(c => ({
+        _id: c.name,
+        count: c.value
+      }));
+
+      const weeklyCompletion = weeklyTrend.map(w => ({
+        _id: w.date,
+        count: w.completed
+      }));
+
       res.json({
         totalTasks: total,
         completedTasks: completed,
         pendingTasks: pending,
         overdueTasks: overdue,
         highPriorityTasks: highPriority,
-        completionPercentage,
+        completionPercentage: completionPercentage.toFixed(2),
         categoryBreakdown,
         priorityBreakdown,
         statusBreakdown,
         weeklyTrend,
         todayTasksCount: todayTasks.length,
         upcomingDeadlines,
-        overdueAlerts
+        overdueAlerts,
+        
+        // Formats returned by analytics-reports branch:
+        tasksByPriority,
+        tasksByStatus,
+        tasksByCategory,
+        weeklyCompletion
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to calculate analytics', message: err.message });
+    }
+  },
+
+  // GET /api/alerts
+  getAlerts: async (req, res) => {
+    try {
+      const tasks = await taskRepository.find({});
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dayAfterTomorrow = new Date(today);
+      dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 2);
+
+      const overdueTasks = tasks
+        .filter(t => t.status === 'OVERDUE')
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+      
+      const tasksDueToday = tasks
+        .filter(t => {
+          if (t.status === 'COMPLETED' || !t.dueDate) return false;
+          const d = new Date(t.dueDate);
+          return d >= today && d < tomorrow;
+        })
+        .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
+
+      const tasksDueTomorrow = tasks
+        .filter(t => {
+          if (t.status === 'COMPLETED' || !t.dueDate) return false;
+          const d = new Date(t.dueDate);
+          return d >= tomorrow && d < dayAfterTomorrow;
+        })
+        .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
+
+      const highPriorityIncompleteTasks = tasks
+        .filter(t => t.priority === 'HIGH' && t.status !== 'COMPLETED')
+        .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+      res.json({
+        overdueTasks,
+        tasksDueToday,
+        tasksDueTomorrow,
+        upcomingDeadlines: [...tasksDueToday, ...tasksDueTomorrow],
+        highPriorityIncompleteTasks
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to retrieve alerts', message: err.message });
     }
   }
 };
 
 module.exports = analyticsController;
+
