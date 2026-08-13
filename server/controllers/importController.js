@@ -1,223 +1,158 @@
-const Task = require('../models/Task');
-const { parseCSVFile } = require('../services/csvService');
-const { extractTextFromPDF } = require('../services/pdfService');
-const { extractTextFromImage } = require('../services/ocrService');
-const { extractTasksFromText } = require('../services/aiExtractionService');
-const { validateCandidateTaskList } = require('../services/taskValidationService');
-const { cleanTempFile } = require('../middleware/uploadMiddleware');
+const fs = require('fs');
+const csvParser = require('csv-parser');
+const pdfExtractor = require('../utils/pdfExtractor');
+const tesseractOCR = require('../utils/tesseractOCR');
+const ollamaService = require('../services/ollamaService');
+const taskRepository = require('../services/taskRepository');
 
-/**
- * @desc    Import and validate CSV file (does NOT save to MongoDB)
- * @route   POST /api/import/csv
- */
-const importCSV = async (req, res) => {
-  const filePath = req.file?.path;
-  try {
-    if (!filePath) {
-      return res.status(400).json({ success: false, message: 'Please upload a CSV file.' });
+const importController = {
+  // POST /api/import/csv
+  importCSV: async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No CSV file uploaded' });
+      }
+
+      const tasks = [];
+      const errors = [];
+      let rowNum = 0;
+
+      fs.createReadStream(req.file.path)
+        .pipe(csvParser())
+        .on('data', (row) => {
+          rowNum++;
+          // Standard columns: title, description, category, dueDate, priority, estimatedTime, status
+          const title = row.title || row.Title || row.name || row.Name || '';
+          const description = row.description || row.Description || '';
+          const category = row.category || row.Category || 'General';
+          const dueDate = row.dueDate || row.DueDate || row.due || row.Due || '';
+          const priority = (row.priority || row.Priority || 'MEDIUM').toUpperCase();
+          const estimatedTime = parseInt(row.estimatedTime || row.EstimatedTime || row.duration || row.durationMinutes || 0, 10);
+          const status = (row.status || row.Status || 'TODO').toUpperCase();
+
+          if (!title) {
+            errors.push(`Row ${rowNum}: Title is missing.`);
+            return;
+          }
+
+          tasks.push({
+            title: title.trim(),
+            description: description.trim(),
+            category: category.trim(),
+            dueDate: dueDate ? new Date(dueDate).toISOString().split('T')[0] : null,
+            priority: ['LOW', 'MEDIUM', 'HIGH'].includes(priority) ? priority : 'MEDIUM',
+            estimatedMinutes: isNaN(estimatedTime) ? 0 : estimatedTime,
+            status: ['TODO', 'IN_PROGRESS', 'COMPLETED', 'OVERDUE'].includes(status) ? status : 'TODO',
+            source: 'csv',
+            aiGenerated: false
+          });
+        })
+        .on('end', () => {
+          // Cleanup temp file
+          fs.unlinkSync(req.file.path);
+          res.json({
+            success: true,
+            tasksCount: tasks.length,
+            tasks,
+            errors
+          });
+        })
+        .on('error', (err) => {
+          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+          res.status(500).json({ error: 'Failed to parse CSV file', message: err.message });
+        });
+    } catch (err) {
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: 'Internal server error in CSV import', message: err.message });
     }
+  },
 
-    const result = await parseCSVFile(filePath);
-    return res.status(200).json({
-      success: true,
-      validRows: result.validRows,
-      invalidRows: result.invalidRows,
-      totalRows: result.totalRows,
-      validCount: result.validCount,
-      invalidCount: result.invalidCount
-    });
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message || 'Failed to process CSV file.'
-    });
-  } finally {
-    cleanTempFile(filePath);
-  }
-};
+  // POST /api/import/pdf
+  importPDF: async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No PDF file uploaded' });
+      }
 
-/**
- * @desc    Extract text from PDF document
- * @route   POST /api/import/pdf
- */
-const importPDF = async (req, res) => {
-  const filePath = req.file?.path;
-  try {
-    if (!filePath) {
-      return res.status(400).json({ success: false, message: 'Please upload a PDF file.' });
-    }
+      console.log(`Extracting text from PDF: ${req.file.path}...`);
+      const extractedText = await pdfExtractor.extractTextFromPDF(req.file.path);
+      
+      console.log('Sending extracted text to Ollama/fallback for task mapping...');
+      const tasks = await ollamaService.analyzeTasksText(extractedText);
+      
+      // Clean up extracted tasks and format them
+      const formattedTasks = tasks.map(task => ({
+        ...task,
+        source: 'pdf',
+        extractedText: extractedText.substring(0, 1000) // Keep snippet of origin text
+      }));
 
-    const result = await extractTextFromPDF(filePath);
-    return res.status(200).json({
-      success: true,
-      filename: req.file.originalname,
-      extractedText: result.extractedText,
-      pageCount: result.pageCount,
-      info: result.info
-    });
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message || 'Failed to extract text from PDF.'
-    });
-  } finally {
-    cleanTempFile(filePath);
-  }
-};
+      // Cleanup file
+      fs.unlinkSync(req.file.path);
 
-/**
- * @desc    Extract text from Image using Tesseract OCR
- * @route   POST /api/import/image
- */
-const importImage = async (req, res) => {
-  const filePath = req.file?.path;
-  try {
-    if (!filePath) {
-      return res.status(400).json({ success: false, message: 'Please upload an image file (PNG, JPG, JPEG).' });
-    }
-
-    const result = await extractTextFromImage(filePath);
-    return res.status(200).json({
-      success: true,
-      filename: req.file.originalname,
-      extractedText: result.extractedText,
-      warning: result.warning
-    });
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message || 'Failed to perform OCR on image.'
-    });
-  } finally {
-    cleanTempFile(filePath);
-  }
-};
-
-/**
- * @desc    Extract structured tasks from raw text using Gemma 3 4B via Ollama
- * @route   POST /api/import/extract-tasks
- */
-const extractTasks = async (req, res) => {
-  try {
-    const { text } = req.body;
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Text field is required for AI task extraction.'
-      });
-    }
-
-    const result = await extractTasksFromText(text);
-    return res.status(200).json(result);
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'AI task extraction failed.'
-    });
-  }
-};
-
-/**
- * @desc    Review and approve candidate tasks (saves ONLY approved tasks to MongoDB)
- * @route   POST /api/import/review (or POST /api/import/approve)
- */
-const reviewTasks = async (req, res) => {
-  try {
-    const { action = 'APPROVE', tasks, approvedTasks, rejectedTasks, defaultSource } = req.body;
-
-    // Handle explicit rejection
-    if (action === 'REJECT') {
-      const rejectList = tasks || rejectedTasks || [];
-      return res.status(200).json({
+      res.json({
         success: true,
-        message: `${rejectList.length} task(s) rejected and discarded without saving to MongoDB.`,
-        rejectedCount: rejectList.length,
-        savedCount: 0
+        extractedTextLength: extractedText.length,
+        tasks: formattedTasks
       });
+    } catch (err) {
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: 'Failed to process PDF', message: err.message });
     }
+  },
 
-    // Determine list of tasks to approve
-    const rawCandidates = approvedTasks || tasks;
+  // POST /api/import/image
+  importImage: async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No image file uploaded' });
+      }
 
-    if (!Array.isArray(rawCandidates) || rawCandidates.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No tasks provided for approval.'
-      });
-    }
+      console.log(`Performing OCR on image: ${req.file.path}...`);
+      const extractedText = await tesseractOCR.extractTextFromImage(req.file.path);
+      
+      console.log('Sending OCR text to Ollama/fallback for task mapping...');
+      const tasks = await ollamaService.analyzeTasksText(extractedText);
 
-    // Filter out any tasks that are explicitly marked rejected in task objects
-    const candidatesToValidate = rawCandidates.filter(t => {
-      if (t.isApproved === false) return false;
-      if (String(t.status).toUpperCase() === 'REJECTED') return false;
-      return true;
-    });
+      const formattedTasks = tasks.map(task => ({
+        ...task,
+        source: 'image',
+        extractedText: extractedText.substring(0, 1000)
+      }));
 
-    if (candidatesToValidate.length === 0) {
-      return res.status(200).json({
+      // Cleanup file
+      fs.unlinkSync(req.file.path);
+
+      res.json({
         success: true,
-        message: 'All tasks were rejected or discarded. 0 tasks saved to MongoDB.',
-        savedCount: 0
+        extractedTextLength: extractedText.length,
+        tasks: formattedTasks
       });
+    } catch (err) {
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: 'Failed to process image OCR', message: err.message });
     }
+  },
 
-    // Validate candidates
-    const validationResult = validateCandidateTaskList(candidatesToValidate);
+  // POST /api/import/confirm
+  confirmImport: async (req, res) => {
+    try {
+      const { tasks } = req.body;
+      if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+        return res.status(400).json({ error: 'No tasks to import' });
+      }
 
-    if (validationResult.validCount === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'None of the submitted candidate tasks passed validation.',
-        invalidTasks: validationResult.invalidTasks
+      const importedTasks = await taskRepository.insertMany(tasks);
+      res.status(201).json({
+        success: true,
+        count: importedTasks.length,
+        tasks: importedTasks
       });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to finalize import', message: err.message });
     }
-
-    // Format tasks for Mongoose Task schema
-    const tasksToInsert = validationResult.validTasks.map(t => {
-      let priorityScore = 2;
-      if (t.priority === 'HIGH') priorityScore = 3;
-      else if (t.priority === 'LOW') priorityScore = 1;
-
-      return {
-        title: t.title,
-        description: t.description || '',
-        category: t.category || 'General',
-        tags: t.tags || [],
-        priority: t.priority || 'MEDIUM',
-        priorityScore,
-        priorityReason: t.priorityReason || '',
-        status: t.status || 'TODO',
-        dueDate: t.dueDate ? new Date(t.dueDate) : undefined,
-        estimatedMinutes: t.estimatedTime || t.estimatedMinutes || 30,
-        source: t.source || defaultSource || 'manual_review',
-        aiGenerated: t.aiGenerated !== undefined ? Boolean(t.aiGenerated) : false,
-        extractedText: t.extractedText || ''
-      };
-    });
-
-    const insertedDocs = await Task.insertMany(tasksToInsert);
-
-    return res.status(201).json({
-      success: true,
-      message: `Successfully approved and created ${insertedDocs.length} task(s) in MongoDB.`,
-      savedCount: insertedDocs.length,
-      createdTasks: insertedDocs,
-      invalidCount: validationResult.invalidCount,
-      invalidTasks: validationResult.invalidTasks
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to process task review.'
-    });
   }
 };
 
-module.exports = {
-  importCSV,
-  importPDF,
-  importImage,
-  extractTasks,
-  reviewTasks,
-  approveTasks: reviewTasks // Alias
-};
+module.exports = importController;
+

@@ -1,122 +1,66 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
+import Toast from './components/Toast';
 
-function App() {
-  const [count, setCount] = useState(0)
+// Pages
+import Dashboard from './pages/Dashboard';
+import AllTasks from './pages/AllTasks';
+import AddTask from './pages/AddTask';
+import TaskDetails from './pages/TaskDetails';
+import SmartSchedule from './pages/SmartSchedule';
+import AIAssistant from './pages/AIAssistant';
+import ImportTasks from './pages/ImportTasks';
+import Analytics from './pages/Analytics';
+import Reports from './pages/Reports';
+import Alerts from './pages/Alerts';
+import Settings from './pages/Settings';
+
+export default function App() {
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+  };
+
+  const closeToast = () => {
+    setToast(null);
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <Router>
+      <div className="flex bg-slate-50 min-h-screen">
+        {/* Sidebar Navigation */}
+        <Sidebar />
+        
+        {/* Main Content Area */}
+        <main className="flex-1 ml-64 p-8 min-h-screen overflow-x-hidden">
+          <div className="max-w-7xl mx-auto">
+            <Routes>
+              <Route path="/" element={<Dashboard showToast={showToast} />} />
+              <Route path="/tasks" element={<AllTasks showToast={showToast} />} />
+              <Route path="/add-task" element={<AddTask showToast={showToast} />} />
+              <Route path="/task/:id" element={<TaskDetails showToast={showToast} />} />
+              <Route path="/schedule" element={<SmartSchedule showToast={showToast} />} />
+              <Route path="/ai-assistant" element={<AIAssistant showToast={showToast} />} />
+              <Route path="/import" element={<ImportTasks showToast={showToast} />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/reports" element={<Reports showToast={showToast} />} />
+              <Route path="/alerts" element={<Alerts showToast={showToast} />} />
+              <Route path="/settings" element={<Settings showToast={showToast} />} />
+            </Routes>
+          </div>
+        </main>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        {/* Global Toast Notification */}
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={closeToast}
+          />
+        )}
+      </div>
+    </Router>
+  );
 }
-
-export default App

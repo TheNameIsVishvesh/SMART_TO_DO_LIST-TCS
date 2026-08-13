@@ -1,17 +1,11 @@
 const mongoose = require('mongoose');
 
-const subtaskSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: true
-  },
-  completed: {
-    type: Boolean,
-    default: false
-  }
+const SubtaskSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  completed: { type: Boolean, default: false }
 });
 
-const taskSchema = new mongoose.Schema({
+const TaskSchema = new mongoose.Schema({
   title: {
     type: String,
     required: true,
@@ -19,12 +13,10 @@ const taskSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    trim: true,
     default: ''
   },
   category: {
     type: String,
-    trim: true,
     default: 'General'
   },
   tags: {
@@ -63,6 +55,10 @@ const taskSchema = new mongoose.Schema({
     type: String,
     default: 'manual'
   },
+  subtasks: {
+    type: [SubtaskSchema],
+    default: []
+  },
   aiGenerated: {
     type: Boolean,
     default: false
@@ -70,20 +66,18 @@ const taskSchema = new mongoose.Schema({
   extractedText: {
     type: String,
     default: ''
-  },
-  subtasks: [subtaskSchema]
+  }
 }, {
-  timestamps: true // Automatically creates createdAt and updatedAt
+  timestamps: true
 });
 
 // Middleware to detect if a task is overdue before saving
-taskSchema.pre('save', function(next) {
-  if (this.status !== 'COMPLETED' && this.dueDate && this.dueDate < new Date()) {
+TaskSchema.pre('save', function(next) {
+  if (this.status !== 'COMPLETED' && this.dueDate && new Date(this.dueDate) < new Date()) {
     this.status = 'OVERDUE';
   }
   next();
 });
 
-const Task = mongoose.model('Task', taskSchema);
+module.exports = mongoose.model('Task', TaskSchema);
 
-module.exports = Task;
