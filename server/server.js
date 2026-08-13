@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const taskRoutes = require('./routes/taskRoutes');
+const importRoutes = require('./routes/importRoutes');
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/tasks', taskRoutes);
+app.use('/api/import', importRoutes);
 
 // Root route
 app.get('/', (req, res) => {
