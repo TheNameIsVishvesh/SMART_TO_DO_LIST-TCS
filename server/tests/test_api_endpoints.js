@@ -6,28 +6,44 @@ const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
 
-const taskRoutes = require('../routes/taskRoutes');
-const importRoutes = require('../routes/importRoutes');
-const Task = require('../models/Task');
+const apiRoutes = require('../routes/api');
+const taskRepository = require('../services/taskRepository');
+const db = require('../utils/db');
 const { createTestPdfBuffer } = require('./helpers/pdfHelper');
 const { createMinimalPngBuffer, createTestBmpWithText } = require('./helpers/imageHelper');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/api/tasks', taskRoutes);
-app.use('/api/import', importRoutes);
+app.use('/api', apiRoutes);
+
+// Register global error handler for the test Express app
+app.use((err, req, res, next) => {
+  let status = err.status || 500;
+  let message = err.message || 'Internal Server Error';
+  
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    status = 400;
+    message = 'File size limit exceeded. Maximum size allowed is 10MB.';
+  } else if (err.message && (err.message.includes('supported') || err.message.includes('prohibited') || err.message.includes('Security'))) {
+    status = 400;
+    message = 'Security Alert: Unsupported or prohibited file type.';
+  }
+
+  res.status(status).json({
+    error: true,
+    message: message
+  });
+});
 
 async function runAllBackendTests() {
   console.log('================================================================');
   console.log('  TEAM MEMBER 4: DOCUMENT INTELLIGENCE BACKEND TEST SUITE');
   console.log('================================================================\n');
 
-  // Connect to MongoDB
-  if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('✔ Connected to MongoDB for testing.');
-  }
+  // Connect to database (with JSON fallback support)
+  await db.connectDB();
+  console.log(`✔ Connected to database in ${taskRepository.getDbMode()} mode for testing.`);
 
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, resolve));
@@ -232,15 +248,15 @@ It is important and will take around 2 hours.`;
     console.log('✔ Approved 2 tasks into MongoDB.');
 
     // Verify tasks are present in DB
-    const dbTasks = await Task.find({ category: 'Testing' });
+    const dbTasks = await taskRepository.find({ category: 'Testing' });
     if (dbTasks.length < 2) {
-      throw new Error('Database verification failed: Approved tasks not found in MongoDB.');
+      throw new Error('Database verification failed: Approved tasks not found.');
     }
-    console.log(`✔ Verified ${dbTasks.length} tasks persisted in MongoDB.`);
+    console.log(`✔ Verified ${dbTasks.length} tasks persisted in database.`);
 
-    // 6.2 Reject candidate tasks -> Must NOT be saved to MongoDB
-    console.log('[Test 6.2] Reject task candidate -> Ensure NOT saved to MongoDB');
-    const countBeforeReject = await Task.countDocuments();
+    // 6.2 Reject candidate tasks -> Must NOT be saved to DB
+    console.log('[Test 6.2] Reject task candidate -> Ensure NOT saved to DB');
+    const countBeforeReject = (await taskRepository.find({})).length;
     const res6_2 = await fetch(`${baseUrl}/api/import/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -252,22 +268,28 @@ It is important and will take around 2 hours.`;
       })
     });
     const json6_2 = await res6_2.json();
-    const countAfterReject = await Task.countDocuments();
+    const countAfterReject = (await taskRepository.find({})).length;
     if (countBeforeReject !== countAfterReject) {
-      throw new Error('Test 6.2 failed: Rejected task was erroneously saved to MongoDB!');
+      throw new Error('Test 6.2 failed: Rejected task was erroneously saved to DB!');
     }
-    console.log('✔ Rejected task was successfully discarded without saving to MongoDB.');
+    console.log('✔ Rejected task was successfully discarded without saving to database.');
 
     // 6.3 Cleanup test documents
-    await Task.deleteMany({ category: 'Testing' });
-    console.log('✔ Cleaned up test data from MongoDB.');
+    await taskRepository.deleteMany({ category: 'Testing' });
+    console.log('✔ Cleaned up test data.');
 
     console.log('\n================================================================');
     console.log('  ✨ ALL BACKEND TESTS PASSED WITH 100% SUCCESS! ✨');
     console.log('================================================================\n');
   } finally {
     server.close();
-    await mongoose.disconnect();
+    // Disconnect if mongodb was used
+    try {
+      const mongoose = require('mongoose');
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.disconnect();
+      }
+    } catch (e) {}
   }
 }
 

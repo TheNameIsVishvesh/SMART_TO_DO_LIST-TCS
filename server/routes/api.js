@@ -67,6 +67,10 @@ router.post('/import/csv', upload.single('file'), importController.importCSV);
 router.post('/import/pdf', upload.single('file'), importController.importPDF);
 router.post('/import/image', upload.single('file'), importController.importImage);
 router.post('/import/confirm', importController.confirmImport);
+router.post('/import/extract-tasks', importController.extractTasks);
+router.post('/import/review', importController.reviewTasks);
+router.post('/import/approve', importController.reviewTasks);
+
 
 // ----------------------------------------------------
 // AI SERVICES ENDPOINTS

@@ -9,69 +9,44 @@ const importController = {
   // POST /api/import/csv
   importCSV: async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'No CSV file uploaded' });
+      if (!req.file || req.file.size === 0) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          error: 'No CSV file uploaded or file is empty',
+          message: 'No CSV file uploaded or file is empty'
+        });
       }
 
-      const tasks = [];
-      const errors = [];
-      let rowNum = 0;
+      const csvService = require('../services/csvService');
+      const result = await csvService.parseCSVFile(req.file.path);
+      
+      // Cleanup temp file
+      fs.unlinkSync(req.file.path);
 
-      fs.createReadStream(req.file.path)
-        .pipe(csvParser())
-        .on('data', (row) => {
-          rowNum++;
-          // Standard columns: title, description, category, dueDate, priority, estimatedTime, status
-          const title = row.title || row.Title || row.name || row.Name || '';
-          const description = row.description || row.Description || '';
-          const category = row.category || row.Category || 'General';
-          const dueDate = row.dueDate || row.DueDate || row.due || row.Due || '';
-          const priority = (row.priority || row.Priority || 'MEDIUM').toUpperCase();
-          const estimatedTime = parseInt(row.estimatedTime || row.EstimatedTime || row.duration || row.durationMinutes || 0, 10);
-          const status = (row.status || row.Status || 'TODO').toUpperCase();
-
-          if (!title) {
-            errors.push(`Row ${rowNum}: Title is missing.`);
-            return;
-          }
-
-          tasks.push({
-            title: title.trim(),
-            description: description.trim(),
-            category: category.trim(),
-            dueDate: dueDate ? new Date(dueDate).toISOString().split('T')[0] : null,
-            priority: ['LOW', 'MEDIUM', 'HIGH'].includes(priority) ? priority : 'MEDIUM',
-            estimatedMinutes: isNaN(estimatedTime) ? 0 : estimatedTime,
-            status: ['TODO', 'IN_PROGRESS', 'COMPLETED', 'OVERDUE'].includes(status) ? status : 'TODO',
-            source: 'csv',
-            aiGenerated: false
-          });
-        })
-        .on('end', () => {
-          // Cleanup temp file
-          fs.unlinkSync(req.file.path);
-          res.json({
-            success: true,
-            tasksCount: tasks.length,
-            tasks,
-            errors
-          });
-        })
-        .on('error', (err) => {
-          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-          res.status(500).json({ error: 'Failed to parse CSV file', message: err.message });
-        });
+      res.json({
+        success: true,
+        tasksCount: result.validCount,
+        tasks: result.validRows,
+        errors: result.invalidRows.map(r => `Row ${r.row}: ${r.errors.join(', ')}`),
+        validRows: result.validRows,
+        invalidRows: result.invalidRows
+      });
     } catch (err) {
       if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      res.status(500).json({ error: 'Internal server error in CSV import', message: err.message });
+      res.status(500).json({ error: 'Failed to parse CSV file', message: err.message });
     }
   },
+
 
   // POST /api/import/pdf
   importPDF: async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'No PDF file uploaded' });
+      if (!req.file || req.file.size === 0) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          error: 'No PDF file uploaded or file is empty',
+          message: 'No PDF file uploaded or file is empty'
+        });
       }
 
       console.log(`Extracting text from PDF: ${req.file.path}...`);
@@ -93,19 +68,24 @@ const importController = {
       res.json({
         success: true,
         extractedTextLength: extractedText.length,
+        extractedText: extractedText,
         tasks: formattedTasks
       });
     } catch (err) {
       if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      res.status(500).json({ error: 'Failed to process PDF', message: err.message });
+      res.status(400).json({ error: 'Failed to process PDF', message: err.message });
     }
   },
 
   // POST /api/import/image
   importImage: async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'No image file uploaded' });
+      if (!req.file || req.file.size === 0) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          error: 'No image file uploaded or file is empty',
+          message: 'No image file uploaded or file is empty'
+        });
       }
 
       console.log(`Performing OCR on image: ${req.file.path}...`);
@@ -126,11 +106,12 @@ const importController = {
       res.json({
         success: true,
         extractedTextLength: extractedText.length,
+        extractedText: extractedText,
         tasks: formattedTasks
       });
     } catch (err) {
       if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      res.status(500).json({ error: 'Failed to process image OCR', message: err.message });
+      res.status(400).json({ error: 'Failed to process image OCR', message: err.message });
     }
   },
 
@@ -151,8 +132,52 @@ const importController = {
     } catch (err) {
       res.status(500).json({ error: 'Failed to finalize import', message: err.message });
     }
+  },
+
+  // POST /api/import/extract-tasks
+  extractTasks: async (req, res) => {
+    try {
+      const { text } = req.body;
+      if (!text) {
+        return res.status(400).json({ error: 'No text provided for extraction' });
+      }
+      const aiExtractionService = require('../services/aiExtractionService');
+      const result = await aiExtractionService.extractTasksFromText(text);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to extract tasks', message: err.message });
+    }
+  },
+
+  // POST /api/import/review
+  reviewTasks: async (req, res) => {
+    try {
+      const { action, tasks } = req.body;
+      if (!tasks || !Array.isArray(tasks)) {
+        return res.status(400).json({ error: 'No tasks provided for review' });
+      }
+
+      if (action === 'APPROVE') {
+        const importedTasks = await taskRepository.insertMany(tasks);
+        return res.status(201).json({
+          success: true,
+          savedCount: importedTasks.length,
+          tasks: importedTasks
+        });
+      } else if (action === 'REJECT') {
+        return res.status(200).json({
+          success: true,
+          message: 'Tasks rejected and discarded successfully.'
+        });
+      } else {
+        return res.status(400).json({ error: 'Invalid action. Must be APPROVE or REJECT.' });
+      }
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to process task review', message: err.message });
+    }
   }
 };
 
 module.exports = importController;
+
 

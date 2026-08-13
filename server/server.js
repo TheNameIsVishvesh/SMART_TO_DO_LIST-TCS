@@ -55,11 +55,15 @@ app.get('*', (req, res, next) => {
 app.use((err, req, res, next) => {
   console.error('Unhandled Error:', err.message);
   
-  const status = err.status || 500;
+  let status = err.status || 500;
   let message = err.message || 'Internal Server Error';
   
   if (err.code === 'LIMIT_FILE_SIZE') {
+    status = 400;
     message = 'File size limit exceeded. Maximum size allowed is 10MB.';
+  } else if (err.message && (err.message.includes('supported') || err.message.includes('prohibited') || err.message.includes('Security'))) {
+    status = 400;
+    message = 'Security Alert: Unsupported or prohibited file type.';
   }
 
   res.status(status).json({
